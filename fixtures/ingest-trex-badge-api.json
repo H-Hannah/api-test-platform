@@ -1,0 +1,45 @@
+{
+  "product_id": 1,
+  "mode": "api",
+  "hint": "T-Rex Portal 勋章模块 https://www.trex.xyz/portal/badge，包含 Badge 列表与详情",
+  "records": [
+    {
+      "url": "https://api.trex.xyz/v1/portal/badges?status=active&page=1&pageSize=20",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer {{token}}",
+        "Content-Type": "application/json",
+        "X-Chain-Id": "1"
+      },
+      "requestBody": "",
+      "responseHeaders": { "Content-Type": "application/json" },
+      "responseBody": "{\"code\":0,\"message\":\"success\",\"data\":{\"list\":[{\"id\":\"badge_001\",\"name\":\"Early Adopter\",\"status\":\"active\"}],\"total\":1}}",
+      "statusCode": 200,
+      "timestamp": 1716100001000
+    },
+    {
+      "url": "https://api.trex.xyz/v1/portal/badges/badge_001",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer {{token}}",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"id\":\"badge_001\",\"name\":\"Early Adopter\",\"description\":\"On-chain proof badge\",\"rarity\":\"rare\"}}",
+      "statusCode": 200,
+      "timestamp": 1716100002000
+    },
+    {
+      "url": "https://api.trex.xyz/v1/portal/badges/upcoming",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer {{token}}",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"items\":[{\"id\":\"badge_up_01\",\"name\":\"New & Upcoming\",\"launchAt\":\"2026-06-01\"}]}}",
+      "statusCode": 200,
+      "timestamp": 1716100003000
+    }
+  ]
+}

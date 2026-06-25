@@ -1,0 +1,39 @@
+{
+  "product_id": 2,
+  "mode": "api",
+  "hint": "Edgen MR-EDGEN-DEMO 平台绑定模块，service=edgen",
+  "records": [
+    {
+      "url": "https://api.edgen.tech/v2/platform/bind/TWITTER?reverse=false",
+      "path": "/v2/platform/bind/TWITTER?reverse=false",
+      "host": "api.edgen.tech",
+      "service": "edgen",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer {{token}}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "requestBody": "",
+      "responseHeaders": { "Content-Type": "application/json" },
+      "responseBody": "{\"code\":0,\"message\":\"success\",\"data\":{\"platform\":\"TWITTER\",\"bound\":true,\"externalId\":\"987654321\",\"boundAt\":\"2026-01-15T08:00:00Z\"}}",
+      "statusCode": 200,
+      "timestamp": 1716200001000
+    },
+    {
+      "url": "https://api.edgen.tech/v2/platform/bindings?page=1&pageSize=20",
+      "path": "/v2/platform/bindings?page=1&pageSize=20",
+      "host": "api.edgen.tech",
+      "service": "edgen",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer {{token}}",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"rows\":[{\"platform\":\"TWITTER\",\"bound\":true,\"boundAt\":\"2026-01-15T08:00:00Z\"},{\"platform\":\"DISCORD\",\"bound\":false}],\"total\":2}}",
+      "statusCode": 200,
+      "timestamp": 1716200002000
+    }
+  ]
+}

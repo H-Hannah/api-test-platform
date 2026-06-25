@@ -1,0 +1,40 @@
+{
+  "product_id": 1,
+  "mode": "scenario",
+  "hint": "T-Rex Portal 用户登录后访问 Badge 页完整流程，参考 /portal/badge 与 /auth/portal-login",
+  "records": [
+    {
+      "url": "https://api.trex.xyz/v1/auth/session",
+      "method": "POST",
+      "requestHeaders": { "Content-Type": "application/json" },
+      "requestBody": "{\"provider\":\"wallet\",\"address\":\"0x1234abcd5678ef90\"}",
+      "responseBody": "{\"code\":0,\"data\":{\"token\":\"trex-session-jwt\",\"userId\":\"usr_42\",\"expiresIn\":86400}}",
+      "statusCode": 200,
+      "timestamp": 1716100100000
+    },
+    {
+      "url": "https://api.trex.xyz/v1/user/me",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer trex-session-jwt",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"userId\":\"usr_42\",\"personaActivated\":true,\"dimensions\":5}}",
+      "statusCode": 200,
+      "timestamp": 1716100101000
+    },
+    {
+      "url": "https://api.trex.xyz/v1/portal/badges?status=active",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer trex-session-jwt",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"list\":[{\"id\":\"badge_001\",\"name\":\"5D Persona Badge\"}],\"reputationScore\":1280}}",
+      "statusCode": 200,
+      "timestamp": 1716100102000
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "product_id": 1,
+  "mode": "scenario",
+  "hint": "用户中心登录后查询个人信息",
+  "records": [
+    {
+      "url": "https://api.example.com/user/auth/login",
+      "method": "POST",
+      "requestHeaders": { "Content-Type": "application/json" },
+      "requestBody": "{\"username\":\"tester\",\"password\":\"test123\"}",
+      "responseBody": "{\"code\":0,\"data\":{\"token\":\"mock-jwt-token\",\"userId\":42}}",
+      "statusCode": 200,
+      "timestamp": 1716000010000
+    },
+    {
+      "url": "https://api.example.com/user/profile",
+      "method": "GET",
+      "requestHeaders": { "Authorization": "Bearer mock-jwt-token" },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"userId\":42,\"name\":\"Tester\"}}",
+      "statusCode": 200,
+      "timestamp": 1716000011000
+    }
+  ]
+}

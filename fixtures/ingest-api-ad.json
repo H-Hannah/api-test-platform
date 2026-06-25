@@ -1,0 +1,31 @@
+{
+  "product_id": 1,
+  "mode": "api",
+  "hint": "广告业务后台，Campaign 活动管理",
+  "records": [
+    {
+      "url": "https://api.example.com/ad/campaigns?page=1&size=20",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.test",
+        "Content-Type": "application/json"
+      },
+      "requestBody": "",
+      "responseHeaders": { "Content-Type": "application/json" },
+      "responseBody": "{\"code\":0,\"message\":\"ok\",\"data\":{\"list\":[],\"total\":0}}",
+      "statusCode": 200,
+      "timestamp": 1716000001000
+    },
+    {
+      "url": "https://api.example.com/ad/campaigns/10086",
+      "method": "GET",
+      "requestHeaders": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.test"
+      },
+      "requestBody": "",
+      "responseBody": "{\"code\":0,\"data\":{\"id\":10086,\"name\":\"春季投放\"}}",
+      "statusCode": 200,
+      "timestamp": 1716000002000
+    }
+  ]
+}
