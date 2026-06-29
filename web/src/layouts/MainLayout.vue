@@ -103,7 +103,7 @@ const navSections = [
     label: '执行与资产',
     items: [
       { path: '/apis', label: '接口定义', icon: Document },
-      { path: '/scenarios', label: '测试场景', icon: List },
+      { path: '/cases', label: '接口用例', icon: List },
       { path: '/reports', label: '测试报告', icon: DataLine },
       { path: '/environments', label: '环境管理', icon: Setting }
     ]

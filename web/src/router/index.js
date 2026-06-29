@@ -37,7 +37,9 @@ const routes = [
         meta: { title: '精准测试' }
       },
       { path: 'mr', redirect: '/impact' },
-      { path: 'scenarios', name: 'scenarios', component: () => import('@/views/Scenarios.vue'), meta: { title: '测试场景' } },
+      { path: 'cases', name: 'cases', component: () => import('@/views/ApiCases.vue'), meta: { title: '接口用例' } },
+      { path: 'scenarios', redirect: '/cases' },
+      { path: 'chain-scenarios', name: 'chain-scenarios', component: () => import('@/views/Scenarios.vue'), meta: { title: '多步链路场景' } },
       { path: 'reports', name: 'reports', component: () => import('@/views/Reports.vue'), meta: { title: '测试报告' } }
     ]
   }

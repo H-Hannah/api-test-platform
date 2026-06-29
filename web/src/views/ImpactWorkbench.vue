@@ -85,7 +85,7 @@
           :disabled="!envId || !result.run_plan?.api_ids?.length"
           @click="runRecommended"
         >
-          执行推荐接口
+          执行推荐用例集
         </el-button>
         <el-button
           v-if="changeMode === 'mr'"
@@ -126,9 +126,10 @@
               </template>
             </el-table-column>
             <el-table-column prop="score" label="分" width="56" />
-            <el-table-column label="" width="56">
+            <el-table-column label="" width="88">
               <template #default="{ row }">
-                <router-link :to="{ path: '/apis', query: { api_id: row.api_id } }">打开</router-link>
+                <router-link :to="{ path: '/cases', query: { api_id: row.api_id } }">用例</router-link>
+                <router-link :to="{ path: '/apis', query: { api_id: row.api_id } }" class="api-open">定义</router-link>
               </template>
             </el-table-column>
           </el-table>
@@ -159,6 +160,26 @@
     <el-empty v-else class="empty" description="选择分支 → 版本 → 需求并加载用例，再填写变更来源后 AI 分析" />
 
     <RunResultDialog v-if="lastBatchRun" v-model="batchDialogOpen" :run="lastBatchRun" :env-name="envName" />
+
+    <el-dialog v-model="runPlanDialogOpen" title="用例集执行结果" width="640px" destroy-on-close>
+      <p v-if="lastRunPlan" class="run-plan-summary">
+        共 {{ lastRunPlan.total }} 项 · 通过 {{ lastRunPlan.passed }} · 失败 {{ lastRunPlan.failed }}<template v-if="lastRunPlan.skipped"> · 跳过 {{ lastRunPlan.skipped }}</template>
+      </p>
+      <el-table v-if="lastRunPlan" :data="lastRunPlan.runs || []" size="small" border max-height="360">
+        <el-table-column prop="name" label="目标" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="dataset_key" label="用例" width="96" show-overflow-tooltip />
+        <el-table-column label="结果" width="72" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'passed' ? 'success' : row.status === 'skipped' ? 'info' : row.status === 'error' ? 'danger' : 'warning'" size="small">
+              {{ row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="runPlanDialogOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="mrCommentDialogOpen" title="MR 评论预览" width="720px" destroy-on-close>
       <p class="mr-preview-hint">确认后将作为评论发布到 GitLab MR：<code>{{ form.gitlab_mr_url }}</code></p>
@@ -207,6 +228,8 @@ const casesJson = ref('')
 const result = ref(null)
 const batchDialogOpen = ref(false)
 const lastBatchRun = ref(null)
+const runPlanDialogOpen = ref(false)
+const lastRunPlan = ref(null)
 
 const envName = computed(() => environments.value.find((e) => e.id === envId.value)?.name || '')
 
@@ -394,13 +417,14 @@ async function runRecommended() {
       api_ids: result.value.run_plan.api_ids || [],
       scenario_ids: result.value.run_plan.scenario_ids || []
     })
-    ElMessage.success(`通过 ${res.passed} / 失败 ${res.failed}`)
+    lastRunPlan.value = res
+    runPlanDialogOpen.value = true
+    ElMessage.success(`用例集执行完成：${res.passed} 通过 / ${res.failed} 失败${res.skipped ? ` / ${res.skipped} 跳过` : ''}`)
     if (res.runs?.length) {
-      const last = res.runs[res.runs.length - 1]
-      if (last.run_id) {
+      const lastPassed = [...res.runs].reverse().find((r) => r.run_id)
+      if (lastPassed?.run_id) {
         try {
-          lastBatchRun.value = await api.getRun(last.run_id)
-          batchDialogOpen.value = true
+          lastBatchRun.value = await api.getRun(lastPassed.run_id)
         } catch {
           /* ignore */
         }
@@ -554,5 +578,15 @@ onMounted(fetchBranches)
   background: var(--color-bg);
   border-radius: 8px;
   border: 1px solid var(--color-border);
+}
+
+.run-plan-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.api-open {
+  margin-left: 8px;
 }
 </style>

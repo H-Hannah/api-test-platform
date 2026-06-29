@@ -19,11 +19,12 @@ func (s *Store) CreateTestDataset(ds *TestDataset) (int64, error) {
 		INSERT INTO test_datasets (
 			product_id, version, requirement_id, dataset_key, name, description,
 			tc_refs, api_bindings, variables, headers_override, body_override,
-			obtain_type, obtain_note, owner, tags, source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			obtain_type, obtain_note, owner, tags, source, assertions, api_fingerprint
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ds.ProductID, ds.Version, ds.RequirementID, ds.DatasetKey, ds.Name, ds.Description,
 		ds.TcRefs, ds.ApiBindings, ds.Variables, ds.HeadersOverride, ds.BodyOverride,
-		ds.ObtainType, ds.ObtainNote, ds.Owner, ds.Tags, ds.Source)
+		ds.ObtainType, ds.ObtainNote, ds.Owner, ds.Tags, ds.Source, defaultDatasetAssertions(ds.Assertions),
+		strings.TrimSpace(ds.ApiFingerprint))
 	if err != nil {
 		return 0, err
 	}
@@ -51,11 +52,12 @@ func (s *Store) UpsertTestDataset(ds *TestDataset) (int64, error) {
 			name = ?, description = ?, tc_refs = ?, api_bindings = ?,
 			variables = ?, headers_override = ?, body_override = ?,
 			obtain_type = ?, obtain_note = ?, owner = ?, tags = ?, source = ?,
-			updated_at = datetime('now')
+			assertions = ?, api_fingerprint = ?, updated_at = datetime('now')
 		WHERE id = ?`,
 		ds.Name, ds.Description, ds.TcRefs, ds.ApiBindings,
 		ds.Variables, ds.HeadersOverride, ds.BodyOverride,
-		ds.ObtainType, ds.ObtainNote, ds.Owner, ds.Tags, ds.Source, existing)
+		ds.ObtainType, ds.ObtainNote, ds.Owner, ds.Tags, ds.Source,
+		defaultDatasetAssertions(ds.Assertions), strings.TrimSpace(ds.ApiFingerprint), existing)
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +68,7 @@ func (s *Store) GetTestDataset(id int64) (*TestDataset, error) {
 	row := s.db.QueryRow(`
 		SELECT id, product_id, version, requirement_id, dataset_key, name, description,
 			tc_refs, api_bindings, variables, headers_override, body_override,
-			obtain_type, obtain_note, owner, tags, source, created_at, updated_at
+			obtain_type, obtain_note, owner, tags, source, assertions, api_fingerprint, created_at, updated_at
 		FROM test_datasets WHERE id = ?`, id)
 	return scanTestDataset(row)
 }
@@ -75,7 +77,7 @@ func (s *Store) ListTestDatasets(f TestDatasetFilter) ([]TestDataset, error) {
 	q := `
 		SELECT id, product_id, version, requirement_id, dataset_key, name, description,
 			tc_refs, api_bindings, variables, headers_override, body_override,
-			obtain_type, obtain_note, owner, tags, source, created_at, updated_at
+			obtain_type, obtain_note, owner, tags, source, assertions, api_fingerprint, created_at, updated_at
 		FROM test_datasets WHERE 1=1`
 	args := []any{}
 	if f.ProductID > 0 {
@@ -110,39 +112,52 @@ func (s *Store) ListTestDatasets(f TestDatasetFilter) ([]TestDataset, error) {
 	if f.APIID <= 0 {
 		return list, nil
 	}
-	api, err := s.GetAPI(f.APIID)
+	api, err := s.getAPIRow(f.APIID)
 	if err != nil {
-		return list, nil
+		return nil, err
 	}
-	binding := strings.ToUpper(strings.TrimSpace(api.Method)) + " " + strings.TrimSpace(api.Path)
 	var matched []TestDataset
 	for _, ds := range list {
-		if datasetMatchesAPI(ds, binding, api.Path) {
+		if DatasetBelongsToAPI(&ds, api) {
 			matched = append(matched, ds)
 		}
 	}
 	return matched, nil
 }
 
-func datasetMatchesAPI(ds TestDataset, binding, path string) bool {
-	var bindings []string
-	_ = json.Unmarshal([]byte(ds.ApiBindings), &bindings)
-	path = strings.TrimSpace(path)
-	for _, b := range bindings {
-		b = strings.TrimSpace(b)
-		if b == "" {
-			continue
-		}
-		if strings.EqualFold(b, binding) || strings.Contains(strings.ToLower(b), strings.ToLower(path)) {
-			return true
-		}
+func (s *Store) CountAPICases(apiID int64) (int, error) {
+	list, err := s.ListTestDatasets(TestDatasetFilter{APIID: apiID})
+	if err != nil {
+		return 0, err
 	}
-	return false
+	return len(list), nil
 }
 
 func (s *Store) DeleteTestDataset(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM test_datasets WHERE id = ?`, id)
 	return err
+}
+
+// UpdateTestDataset 更新可编辑字段（名称、请求覆盖、断言等）。
+func (s *Store) UpdateTestDataset(ds *TestDataset) error {
+	if ds.ID <= 0 {
+		return fmt.Errorf("invalid dataset id")
+	}
+	res, err := s.db.Exec(`
+		UPDATE test_datasets SET
+			name = ?, description = ?, variables = ?, headers_override = ?,
+			body_override = ?, assertions = ?, tags = ?, api_fingerprint = ?, updated_at = datetime('now')
+		WHERE id = ?`,
+		ds.Name, ds.Description, ds.Variables, ds.HeadersOverride, ds.BodyOverride,
+		defaultDatasetAssertions(ds.Assertions), defaultDatasetTags(ds.Tags), strings.TrimSpace(ds.ApiFingerprint), ds.ID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) UpsertTestDataSpec(spec *TestDataSpec) (int64, error) {
@@ -226,12 +241,64 @@ func (s *Store) UpdateEnvironmentVariables(envID int64, variables string) error 
 	return err
 }
 
+func defaultDatasetAssertions(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "[]"
+	}
+	return raw
+}
+
+func defaultDatasetTags(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "[]"
+	}
+	return raw
+}
+
+// EnrichDatasetStale 当接口定义指纹与用例保存时不一致时标记过期。
+func (s *Store) EnrichDatasetStale(apiID int64, ds *TestDataset) {
+	if ds == nil || apiID <= 0 {
+		return
+	}
+	api, err := s.getAPIRow(apiID)
+	if err != nil {
+		return
+	}
+	if stale, reason := DatasetStaleAgainstAPI(api, ds); stale {
+		ds.Stale = true
+		ds.StaleReason = reason
+	}
+}
+
+func datasetStaleAgainstAPI(apiUpdated, dsUpdated string) bool {
+	a := normalizeSQLiteTime(apiUpdated)
+	b := normalizeSQLiteTime(dsUpdated)
+	if a == "" || b == "" {
+		return false
+	}
+	return a > b
+}
+
+func normalizeSQLiteTime(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	s = strings.Replace(s, "T", " ", 1)
+	if len(s) >= 19 {
+		return s[:19]
+	}
+	return s
+}
+
 func scanTestDataset(row *sql.Row) (*TestDataset, error) {
 	var ds TestDataset
 	err := row.Scan(&ds.ID, &ds.ProductID, &ds.Version, &ds.RequirementID, &ds.DatasetKey,
 		&ds.Name, &ds.Description, &ds.TcRefs, &ds.ApiBindings, &ds.Variables,
 		&ds.HeadersOverride, &ds.BodyOverride, &ds.ObtainType, &ds.ObtainNote,
-		&ds.Owner, &ds.Tags, &ds.Source, &ds.CreatedAt, &ds.UpdatedAt)
+		&ds.Owner, &ds.Tags, &ds.Source, &ds.Assertions, &ds.ApiFingerprint, &ds.CreatedAt, &ds.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +310,7 @@ func scanTestDatasetRows(rows *sql.Rows) (*TestDataset, error) {
 	err := rows.Scan(&ds.ID, &ds.ProductID, &ds.Version, &ds.RequirementID, &ds.DatasetKey,
 		&ds.Name, &ds.Description, &ds.TcRefs, &ds.ApiBindings, &ds.Variables,
 		&ds.HeadersOverride, &ds.BodyOverride, &ds.ObtainType, &ds.ObtainNote,
-		&ds.Owner, &ds.Tags, &ds.Source, &ds.CreatedAt, &ds.UpdatedAt)
+		&ds.Owner, &ds.Tags, &ds.Source, &ds.Assertions, &ds.ApiFingerprint, &ds.CreatedAt, &ds.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

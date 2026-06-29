@@ -1,4 +1,10 @@
 -- 环境全局化：去掉 product_id，同名环境合并（保留 variables 最丰富的一条）
+-- 需临时关闭外键：env_id 会先指向 environments_new 中的 id
+
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS _env_map;
+DROP TABLE IF EXISTS environments_new;
 
 CREATE TABLE _env_map (old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL);
 
@@ -44,3 +50,5 @@ UPDATE environments SET is_default = 0;
 UPDATE environments SET is_default = 1 WHERE name = 'PROD';
 
 DROP TABLE _env_map;
+
+PRAGMA foreign_keys = ON;

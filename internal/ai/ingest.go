@@ -28,6 +28,10 @@ func (s *IngestService) Ingest(req IngestRequest) (*IngestResponse, error) {
 		mode = "api"
 	}
 
+	if mode == "api_cases" {
+		return s.ingestAPICases(req)
+	}
+
 	tree, err := s.store.BuildFolderTree(req.ProductID)
 	if err != nil {
 		return nil, err
@@ -92,11 +96,11 @@ func (s *IngestService) saveAPI(req IngestRequest, item AIAPIItem, cache map[str
 		return nil, nil, err
 	}
 
-	svc := resolveServiceForItem(req.Records, item)
-	pathOnly := PathOnly(item.Path)
-	fullTpl := BuildFullURLTemplate(svc, item.Path)
+	envs := s.ingestAllEnvironments()
+	fullTpl, pathOnly := buildURLTemplate(req.Records, item, envs)
 
-	headersJSON, _ := json.Marshal(resolveAPIHeaders(item, req.Records))
+	headersJSON, _ := json.Marshal(templatizeHeaderKVs(resolveAPIHeaders(item, req.Records), envs))
+	body := templatizeBody(resolveAPIBody(item, req.Records), envs)
 	api := &store.APIDefinition{
 		ProductID:       req.ProductID,
 		FolderID:        folderID,
@@ -105,33 +109,236 @@ func (s *IngestService) saveAPI(req IngestRequest, item AIAPIItem, cache map[str
 		Path:            pathOnly,
 		FullURLTemplate: fullTpl,
 		Headers:         string(headersJSON),
-		Body:            resolveAPIBody(item, req.Records),
+		Body:            body,
 		BodyType:        defaultBodyType(item.BodyType),
 		Description:     item.Description,
 		AIRemark:        item.AIRemark,
-		SourceRecord:    matchSourceRecordJSON(req.Records, item),
 	}
 	id, err := s.store.CreateAPI(api)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	assertions := make([]store.Assertion, len(item.Assertions))
-	for i, a := range item.Assertions {
+	return &SavedAPI{ID: id, Name: api.Name, FolderID: folderID, FolderPath: folderPath}, folders, nil
+}
+
+func (s *IngestService) GenerateAPICases(apiID int64, hint string) (*IngestResponse, error) {
+	api, err := s.store.GetAPI(apiID)
+	if err != nil {
+		return nil, fmt.Errorf("api not found: %w", err)
+	}
+	return s.ingestAPICases(IngestRequest{
+		ProductID: api.ProductID,
+		ApiID:     apiID,
+		Mode:      "api_cases",
+		Records:   []RawRecord{syntheticRecordFromAPI(api)},
+		Hint:      hint,
+	})
+}
+
+func syntheticRecordFromAPI(api *store.APIDefinition) RawRecord {
+	rec := RawRecord{
+		Method:      api.Method,
+		Path:        api.Path,
+		URL:         strings.TrimSpace(api.FullURLTemplate),
+		RequestBody: api.Body,
+		StatusCode:  200,
+	}
+	if rec.URL == "" {
+		rec.URL = api.Path
+	}
+	var headers []HeaderKV
+	_ = json.Unmarshal([]byte(api.Headers), &headers)
+	for _, h := range headers {
+		if !h.Enabled || h.Name == "" {
+			continue
+		}
+		if rec.RequestHeaders == nil {
+			rec.RequestHeaders = map[string]string{}
+		}
+		rec.RequestHeaders[h.Name] = h.Value
+	}
+	return rec
+}
+
+func (s *IngestService) ingestAPICases(req IngestRequest) (*IngestResponse, error) {
+	if req.ApiID <= 0 {
+		return nil, fmt.Errorf("api_id required for api_cases mode")
+	}
+	api, err := s.store.GetAPI(req.ApiID)
+	if err != nil {
+		return nil, fmt.Errorf("api not found: %w", err)
+	}
+
+	record := pickCaseRecord(req.Records, api)
+	if record == nil {
+		return nil, fmt.Errorf("no matching record for api")
+	}
+
+	prompt := buildApiCasesPrompt(api, *record, req.Hint)
+	raw, err := s.ai.Complete(prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	var result IngestCasesAIResult
+	if err := ParseJSON(raw, &result); err != nil {
+		raw2, err2 := s.ai.Complete(prompt + "\n\n上次输出无法解析，请只输出合法 JSON。")
+		if err2 != nil {
+			return nil, fmt.Errorf("%v; retry: %v; raw: %s", err, err2, truncate(raw, 500))
+		}
+		if err := ParseJSON(raw2, &result); err != nil {
+			return nil, fmt.Errorf("AI JSON parse failed: %w", err)
+		}
+	}
+	if len(result.Datasets) == 0 {
+		return nil, fmt.Errorf("AI did not return datasets")
+	}
+
+	envs := s.ingestAllEnvironments()
+	binding := strings.ToUpper(strings.TrimSpace(api.Method)) + " " + strings.TrimSpace(api.Path)
+	out := &IngestResponse{}
+	for _, item := range result.Datasets {
+		saved, err := s.saveCaseDataset(req.ProductID, api.ID, binding, item, envs)
+		if err != nil {
+			return nil, err
+		}
+		out.Datasets = append(out.Datasets, *saved)
+	}
+	return out, nil
+}
+
+func pickCaseRecord(records []RawRecord, api *store.APIDefinition) *RawRecord {
+	item := AIAPIItem{Method: api.Method, Path: api.Path}
+	if rec := matchRecord(records, item); rec != nil {
+		return rec
+	}
+	if len(records) == 1 {
+		return &records[0]
+	}
+	return nil
+}
+
+func (s *IngestService) saveCaseDataset(productID, apiID int64, binding string, item AICaseDataset, envs []*store.Environment) (*SavedDataset, error) {
+	api, err := s.store.GetAPI(apiID)
+	if err != nil {
+		return nil, err
+	}
+	varsJSON, _ := json.Marshal(item.Variables)
+	if len(item.Variables) == 0 {
+		varsJSON = []byte("{}")
+	}
+	headers := templatizeHeaderKVs(item.HeadersOverride, envs)
+	headersJSON, _ := json.Marshal(headers)
+	body := templatizeBody(item.BodyOverride, envs)
+	assertions := assertionsToRunnerJSON(item.Assertions)
+	tagsJSON, _ := json.Marshal(normalizeCaseTags(item.Tags))
+
+	key := strings.TrimSpace(item.DatasetKey)
+	if key == "" {
+		key = slugDatasetKey(item.Name)
+	}
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		name = key
+	}
+
+	ds := &store.TestDataset{
+		ProductID:       productID,
+		Version:         "recorder",
+		RequirementID:   fmt.Sprintf("api-%d", apiID),
+		DatasetKey:      key,
+		Name:            name,
+		Description:     strings.TrimSpace(item.Description),
+		TcRefs:          "[]",
+		ApiBindings:     mustJSONArray([]string{binding}),
+		Variables:       string(varsJSON),
+		HeadersOverride: string(headersJSON),
+		BodyOverride:    body,
+		ObtainType:      "recorder",
+		Owner:           "qa",
+		Tags:            string(tagsJSON),
+		Source:          "ai",
+		Assertions:      assertions,
+		ApiFingerprint:  store.APIDefinitionFingerprint(api),
+	}
+	id, err := s.store.UpsertTestDataset(ds)
+	if err != nil {
+		return nil, err
+	}
+	return &SavedDataset{ID: id, Name: name, DatasetKey: key, ApiID: apiID}, nil
+}
+
+func normalizeCaseTags(tags []string) []string {
+	out := make([]string, 0, len(tags)+2)
+	seen := map[string]bool{}
+	hasInferred := false
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+		if t == "ai-inferred" {
+			hasInferred = true
+		}
+	}
+	if hasInferred {
+		for _, extra := range []string{"ai-inferred", "draft"} {
+			if !seen[extra] {
+				seen[extra] = true
+				out = append(out, extra)
+			}
+		}
+	}
+	return out
+}
+
+func assertionsToRunnerJSON(list []AIAssertion) string {
+	if len(list) == 0 {
+		return "[]"
+	}
+	out := make([]runner.AssertionInput, len(list))
+	for i, a := range list {
 		expr := a.Expression
 		if a.Type == "json_path" {
 			expr = runner.NormalizeJSONPathExpr(expr)
 		}
-		assertions[i] = store.Assertion{
+		out[i] = runner.AssertionInput{
 			Type: a.Type, Expression: expr,
-			Operator: defaultOp(a.Operator), Expected: a.Expected, Enabled: true,
+			Operator: defaultOp(a.Operator), Expected: a.Expected,
 		}
 	}
-	if err := s.store.CreateAssertions(id, assertions); err != nil {
-		return nil, nil, err
-	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
 
-	return &SavedAPI{ID: id, Name: api.Name, FolderID: folderID, FolderPath: folderPath}, folders, nil
+func slugDatasetKey(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "case"
+	}
+	return s
+}
+
+func mustJSONArray(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 func (s *IngestService) saveScenario(req IngestRequest, sc AIScenario, cache map[string]int64) (*SavedScenario, []CreatedFolder, error) {
@@ -157,11 +364,12 @@ func (s *IngestService) saveScenario(req IngestRequest, sc AIScenario, cache map
 	}
 
 	for i, step := range sc.Steps {
-		headersJSON, _ := json.Marshal(resolveStepHeaders(step, req.Records))
+		envs := s.ingestAllEnvironments()
+		headersJSON, _ := json.Marshal(templatizeHeaderKVs(resolveStepHeaders(step, req.Records), envs))
 		extractJSON, _ := json.Marshal(step.ExtractRules)
 		assertJSON, _ := json.Marshal(step.Assertions)
-		svc := resolveServiceForStep(req.Records, step)
-		stepPath := BuildStepRequestPath(svc, step.Path)
+		item := AIAPIItem{Method: step.Method, Path: step.Path}
+		stepPath, _ := buildURLTemplate(req.Records, item, envs)
 		st := &store.ScenarioStep{
 			ScenarioID:   sid,
 			StepOrder:    i + 1,
@@ -169,7 +377,7 @@ func (s *IngestService) saveScenario(req IngestRequest, sc AIScenario, cache map
 			Method:       strings.ToUpper(step.Method),
 			Path:         stepPath,
 			Headers:      string(headersJSON),
-			Body:         resolveStepBody(step, req.Records),
+			Body:         templatizeBody(resolveStepBody(step, req.Records), envs),
 			ExtractRules: string(extractJSON),
 			Assertions:   string(assertJSON),
 		}
@@ -219,43 +427,30 @@ func defaultOp(op string) string {
 }
 
 func matchSourceRecordJSON(records []RawRecord, item AIAPIItem) string {
-	method := strings.ToUpper(item.Method)
-	for _, r := range records {
-		if !strings.EqualFold(r.Method, method) {
-			continue
-		}
-		rPath := r.Path
-		if rPath == "" {
-			rPath = pathFromURL(r.URL)
-		}
-		if rPath != "" && (rPath == item.Path || strings.Contains(rPath, item.Path) || strings.Contains(item.Path, rPath)) {
-			b, _ := json.Marshal(map[string]string{
-				"url": r.URL, "path": rPath, "host": r.Host, "service": r.Service,
-			})
-			return string(b)
-		}
-		if r.URL != "" && strings.Contains(r.URL, item.Path) {
-			b, _ := json.Marshal(map[string]string{
-				"url": r.URL, "path": rPath, "host": r.Host, "service": r.Service,
-			})
-			return string(b)
-		}
-	}
-	return ""
-}
-
-func pathFromURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	rec := matchRecord(records, item)
+	if rec == nil {
 		return ""
 	}
-	if i := strings.Index(raw, "://"); i >= 0 {
-		raw = raw[i+3:]
+	rPath := rec.Path
+	if rPath == "" {
+		rPath = pathFromURL(rec.URL)
 	}
-	if j := strings.Index(raw, "/"); j >= 0 {
-		return raw[j:]
+	b, _ := json.Marshal(map[string]string{
+		"url": rec.URL, "path": rPath, "host": rec.Host, "service": rec.Service,
+	})
+	return string(b)
+}
+
+func (s *IngestService) ingestAllEnvironments() []*store.Environment {
+	envs, err := s.store.ListAllEnvironments()
+	if err != nil || len(envs) == 0 {
+		return nil
 	}
-	return ""
+	out := make([]*store.Environment, len(envs))
+	for i := range envs {
+		out[i] = &envs[i]
+	}
+	return out
 }
 
 func appendUniqueFolders(dst []CreatedFolder, add []CreatedFolder) []CreatedFolder {

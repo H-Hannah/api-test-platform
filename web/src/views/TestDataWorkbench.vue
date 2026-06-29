@@ -3,9 +3,11 @@
     <div class="page-toolbar">
       <span class="toolbar-title">测试数据</span>
       <span class="spacer"></span>
-      <router-link to="/apis" class="link-next">接口执行 →</router-link>
+      <router-link to="/cases" class="link-next">接口用例 →</router-link>
     </div>
 
+    <el-tabs v-model="mainTab" class="main-tabs" @tab-change="onMainTabChange">
+      <el-tab-pane label="需求用例" name="requirement">
     <el-row :gutter="16" class="body-row">
       <el-col :span="10">
         <section class="input-panel">
@@ -211,6 +213,51 @@
         <el-empty v-else description="从 GitLab 加载三类文档后生成测试集" />
       </el-col>
     </el-row>
+      </el-tab-pane>
+
+      <el-tab-pane label="录制用例" name="recorder">
+        <section class="recorder-panel">
+          <div class="recorder-head">
+            <p class="recorder-hint">来自 Chrome 插件「保存用例」的接口测试数据集，可在「接口用例」页编辑与执行。</p>
+            <el-button size="small" :loading="recorderLoading" @click="loadRecorderDatasets">刷新</el-button>
+          </div>
+          <el-table
+            v-loading="recorderLoading"
+            :data="recorderDatasets"
+            size="small"
+            empty-text="暂无录制用例，请使用插件保存"
+          >
+            <el-table-column label="绑定接口" min-width="100" show-overflow-tooltip>
+              <template #default="{ row }">
+                <router-link v-if="recorderApiId(row)" :to="recorderCaseLink(row)" class="case-route">
+                  #{{ recorderApiId(row) }}
+                </router-link>
+                <span v-else class="muted">{{ row.requirement_id || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="dataset_key" label="键" width="96" show-overflow-tooltip />
+            <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="obtain_type" label="来源" width="72" />
+            <el-table-column label="断言" width="56" align="center">
+              <template #default="{ row }">{{ assertionCount(row) }}</template>
+            </el-table-column>
+            <el-table-column label="标签" width="88" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="hasTag(row.tags, 'draft')" class="tag-draft">草稿</span>
+                <span v-else-if="hasTag(row.tags, 'ai-inferred')" class="tag-inferred">AI</span>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="updated_at" label="更新" width="140" show-overflow-tooltip />
+            <el-table-column label="" width="72" align="center">
+              <template #default="{ row }">
+                <router-link :to="recorderCaseLink(row)" class="case-route">打开</router-link>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -219,9 +266,14 @@ import { ref, computed, watch, inject, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
+import { hasTag } from '@/utils/dataset'
 
 const route = useRoute()
 const { envId } = inject('appStore')
+
+const mainTab = ref('requirement')
+const recorderDatasets = ref([])
+const recorderLoading = ref(false)
 
 const docForm = ref({ branch: '', version: '', requirement_id: '' })
 const branches = ref([])
@@ -362,6 +414,10 @@ async function loadDocs() {
 
 function applyRouteQuery() {
   const q = route.query
+  if (q.tab === 'recorder') {
+    mainTab.value = 'recorder'
+    loadRecorderDatasets()
+  }
   if (q.branch) docForm.value.branch = String(q.branch)
   if (q.version) {
     docForm.value.version = String(q.version)
@@ -375,6 +431,7 @@ function applyRouteQuery() {
   if (q.prd_text) form.value.prd_text = String(q.prd_text)
   if (q.be_tech_text) form.value.be_tech_text = String(q.be_tech_text)
   if (q.cases_json) form.value.cases_json = String(q.cases_json)
+  if (q.version && q.requirement_id) loadDatasets()
 }
 
 async function generate() {
@@ -446,6 +503,41 @@ async function loadDatasets() {
   }
 }
 
+function recorderApiId(row) {
+  const m = String(row?.requirement_id || '').match(/^api-(\d+)$/)
+  return m ? Number(m[1]) : null
+}
+
+function recorderCaseLink(row) {
+  const apiId = recorderApiId(row)
+  const query = {}
+  if (apiId) query.api_id = apiId
+  if (row?.id) query.dataset_id = row.id
+  return { path: '/cases', query }
+}
+
+function assertionCount(row) {
+  try {
+    const list = JSON.parse(row?.assertions || '[]')
+    return Array.isArray(list) ? list.length : 0
+  } catch {
+    return 0
+  }
+}
+
+async function loadRecorderDatasets() {
+  recorderLoading.value = true
+  try {
+    recorderDatasets.value = await api.listTestDatasets({ version: 'recorder' })
+  } finally {
+    recorderLoading.value = false
+  }
+}
+
+function onMainTabChange(name) {
+  if (name === 'recorder') loadRecorderDatasets()
+}
+
 async function removeDataset(row) {
   await ElMessageBox.confirm(`删除数据集「${row.name}」？`, '确认', { type: 'warning' })
   await api.deleteTestDataset(row.id)
@@ -475,7 +567,8 @@ onMounted(async () => {
   await fetchBranches()
   if (docForm.value.version) await onVersionChange()
   if (canLoadDocs.value && !form.value.prd_text) await loadDocs()
-  else loadDatasets()
+  else if (mainTab.value === 'requirement') loadDatasets()
+  if (mainTab.value === 'recorder') loadRecorderDatasets()
 })
 </script>
 
@@ -508,6 +601,50 @@ onMounted(async () => {
 
 .link-next {
   font-size: 13px;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.main-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+
+  :deep(.el-tabs__header) {
+    margin: 0;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  :deep(.el-tabs__content) {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+}
+
+.recorder-panel {
+  padding: 16px;
+}
+
+.recorder-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.recorder-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+  flex: 1;
+}
+
+.case-route {
+  font-size: 12px;
   color: var(--color-primary);
   text-decoration: none;
 }

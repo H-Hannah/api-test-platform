@@ -10,7 +10,8 @@ import (
 type IngestRequest struct {
 	ProductID  int64         `json:"product_id"`
 	EnvID      int64         `json:"env_id,omitempty"`
-	Mode       string        `json:"mode"` // api | scenario
+	Mode       string        `json:"mode"` // api | scenario | api_cases
+	ApiID      int64         `json:"api_id,omitempty"`
 	Records    []RawRecord   `json:"records"`
 	Hint       string        `json:"hint,omitempty"` // optional business hint from user
 }
@@ -129,7 +130,15 @@ type ExtractRule struct {
 type IngestResponse struct {
 	APIs      []SavedAPI      `json:"apis,omitempty"`
 	Scenario  *SavedScenario  `json:"scenario,omitempty"`
+	Datasets  []SavedDataset  `json:"datasets,omitempty"`
 	Folders   []CreatedFolder `json:"folders_created,omitempty"`
+}
+
+type SavedDataset struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	DatasetKey string `json:"dataset_key"`
+	ApiID      int64  `json:"api_id"`
 }
 
 type SavedAPI struct {

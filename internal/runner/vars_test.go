@@ -12,14 +12,22 @@ func TestBuildRunVarsFallbackBaseURL(t *testing.T) {
 		Variables: `{}`,
 	}
 	vars := buildRunVars(env)
-	if vars["base_url_edgen"] != "https://api.edgen.tech" {
-		t.Fatalf("base_url_edgen=%q", vars["base_url_edgen"])
+	if vars["base_url"] != "https://api.edgen.tech" {
+		t.Fatalf("base_url=%q", vars["base_url"])
 	}
 }
 
-func TestSubstituteBaseURLAlias(t *testing.T) {
+func TestSubstituteURLVar(t *testing.T) {
+	vars := map[string]string{"edgen_url": "https://api.edgen.tech", "base_url": "https://api.edgen.tech"}
+	got := substitute("{{edgen_url}}/v2/foo", vars)
+	if got != "https://api.edgen.tech/v2/foo" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSubstituteURLFallback(t *testing.T) {
 	vars := map[string]string{"base_url": "https://api.edgen.tech"}
-	got := substitute("{{base_url_edgen}}/v2/foo", vars)
+	got := substitute("{{trex_url}}/v2/foo", vars)
 	if got != "https://api.edgen.tech/v2/foo" {
 		t.Fatalf("got %q", got)
 	}

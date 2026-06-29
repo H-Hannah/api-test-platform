@@ -84,6 +84,7 @@ export const api = {
   importTestData: (body) => http.post('/api/v1/testdata/import', body),
   listTestDatasets: (params = {}) => http.get('/api/v1/testdata/datasets', { params }),
   getTestDataset: (id) => http.get(`/api/v1/testdata/datasets/${id}`),
+  updateTestDataset: (id, body) => http.patch(`/api/v1/testdata/datasets/${id}`, body),
   deleteTestDataset: (id) => http.delete(`/api/v1/testdata/datasets/${id}`),
   importEnvVarKeys: (envId, body) =>
     http.post(`/api/v1/environments/${envId}/import-var-keys`, body),
@@ -99,6 +100,7 @@ export const api = {
   listTestDocsCatalog: (params = {}) =>
     http.get('/api/v1/docs/testcases/catalog', { params }),
   getAPI: (id) => http.get(`/api/v1/apis/${id}`),
+  generateAPICases: (id, body = {}) => http.post(`/api/v1/apis/${id}/generate-cases`, body),
   deleteAPI: (id) => http.delete(`/api/v1/apis/${id}`),
   runAPI: (id, envId, datasetId) =>
     http.post(`/api/v1/apis/${id}/run`, { env_id: envId, dataset_id: datasetId || 0 }),

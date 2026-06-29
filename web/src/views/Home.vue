@@ -13,7 +13,7 @@
         <span class="sep">·</span>
         <router-link to="/apis">接口定义</router-link>
         <span class="sep">·</span>
-        <router-link to="/scenarios">测试场景</router-link>
+        <router-link to="/cases">接口用例</router-link>
         <span class="sep">·</span>
         <router-link to="/reports">测试报告</router-link>
         <span class="sep">·</span>

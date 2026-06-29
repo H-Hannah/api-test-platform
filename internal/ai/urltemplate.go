@@ -2,41 +2,20 @@ package ai
 
 import (
 	"strings"
+
+	"api-test-platform/internal/runner"
+	"api-test-platform/internal/store"
 )
 
-// ServiceBaseVarKey 将微服务名映射为环境变量键，如 anchor -> base_url_anchor。
-func ServiceBaseVarKey(service string) string {
-	s := normalizeServiceName(service)
-	if s == "" {
-		return "base_url"
+func stripURLVarPrefix(p string) (string, bool) {
+	p = strings.TrimSpace(p)
+	if !strings.HasPrefix(p, "{{") {
+		return p, false
 	}
-	return "base_url_" + s
-}
-
-func normalizeServiceName(service string) string {
-	s := strings.ToLower(strings.TrimSpace(service))
-	s = strings.ReplaceAll(s, "-", "_")
-	switch s {
-	case "", "www", "api", "app", "m":
-		return ""
-	case "badge", "persona", "portal":
-		return "trex"
-	case "quests":
-		return "quest"
-	case "openreplay", "replay":
-		return "openreplay"
-	case "edgen", "ospprotocol":
-		return "edgen"
-	default:
-		return s
+	if i := strings.Index(p, "}}"); i >= 0 {
+		return strings.TrimSpace(p[i+2:]), true
 	}
-}
-
-func serviceFromFolderPath(path []string) string {
-	if len(path) < 2 {
-		return ""
-	}
-	return normalizeServiceName(path[len(path)-1])
+	return p, false
 }
 
 func ensureLeadingSlash(p string) string {
@@ -44,12 +23,9 @@ func ensureLeadingSlash(p string) string {
 	if p == "" {
 		return "/"
 	}
-	if strings.Contains(p, "{{base_url") {
-		if i := strings.Index(p, "}}"); i >= 0 {
-			rest := strings.TrimSpace(p[i+2:])
-			if rest != "" && !strings.HasPrefix(rest, "/") {
-				return p[:i+2] + "/" + rest
-			}
+	if rest, ok := stripURLVarPrefix(p); ok {
+		if rest != "" && !strings.HasPrefix(rest, "/") {
+			return p[:strings.Index(p, "}}")+2] + "/" + rest
 		}
 		return p
 	}
@@ -59,46 +35,83 @@ func ensureLeadingSlash(p string) string {
 	return p
 }
 
-// PathOnly 去掉模板前缀，供列表展示。
+// PathOnly 去掉 {{var}} 前缀，供列表展示 pathname。
 func PathOnly(p string) string {
 	p = strings.TrimSpace(p)
-	if strings.Contains(p, "{{base_url") {
-		if i := strings.Index(p, "}}"); i >= 0 {
-			return ensureLeadingSlash(p[i+2:])
-		}
+	if rest, ok := stripURLVarPrefix(p); ok {
+		return ensureLeadingSlash(rest)
 	}
 	return ensureLeadingSlash(p)
 }
 
-// BuildFullURLTemplate 生成可执行 URL 模板。
-func BuildFullURLTemplate(service, path string) string {
-	path = PathOnly(path)
-	if strings.Contains(path, "{{base_url") {
-		return path
+// buildURLTemplate 用全部运行环境变量扫描录制 URL，将匹配值替换为 {{key}}。
+func buildURLTemplate(records []RawRecord, item AIAPIItem, envs []*store.Environment) (fullTpl, pathOnly string) {
+	rec := matchRecord(records, item)
+	raw := recordFullURL(rec, item)
+	if raw == "" {
+		p := PathOnly(item.Path)
+		return p, p
 	}
-	key := ServiceBaseVarKey(service)
-	return "{{" + key + "}}" + path
+	fullTpl = runner.TemplatizeFromEnvironments(raw, envs)
+	if fullTpl == "" {
+		fullTpl = raw
+	}
+	return fullTpl, PathOnly(fullTpl)
 }
 
-// BuildStepRequestPath 场景步骤存库用的请求路径（含服务 base 变量）。
-func BuildStepRequestPath(service, path string) string {
-	return BuildFullURLTemplate(service, path)
+func recordFullURL(rec *RawRecord, item AIAPIItem) string {
+	if rec == nil {
+		return ""
+	}
+	if u := strings.TrimSpace(rec.URL); u != "" {
+		return u
+	}
+	host := strings.TrimSpace(rec.Host)
+	p := strings.TrimSpace(rec.Path)
+	if p == "" {
+		p = strings.TrimSpace(item.Path)
+	}
+	if host == "" || p == "" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return "https://" + host + p
 }
 
-func resolveServiceForItem(records []RawRecord, item AIAPIItem) string {
-	if r := matchRecord(records, item); r != nil && r.Service != "" {
-		return r.Service
+func templatizeHeaderKVs(list []HeaderKV, envs []*store.Environment) []HeaderKV {
+	if len(envs) == 0 {
+		return list
 	}
-	if s := serviceFromFolderPath(item.FolderPath); s != "" {
-		return s
+	out := make([]HeaderKV, len(list))
+	for i, h := range list {
+		out[i] = HeaderKV{
+			Name:    h.Name,
+			Value:   runner.TemplatizeFromEnvironments(h.Value, envs),
+			Enabled: h.Enabled,
+		}
 	}
-	return ""
+	return out
 }
 
-func resolveServiceForStep(records []RawRecord, step AIScenarioStep) string {
-	item := AIAPIItem{Method: step.Method, Path: step.Path}
-	if r := matchRecord(records, item); r != nil && r.Service != "" {
-		return r.Service
+func templatizeBody(body string, envs []*store.Environment) string {
+	if body == "" || len(envs) == 0 {
+		return body
+	}
+	return runner.TemplatizeFromEnvironments(body, envs)
+}
+
+func pathFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if i := strings.Index(raw, "://"); i >= 0 {
+		raw = raw[i+3:]
+	}
+	if j := strings.Index(raw, "/"); j >= 0 {
+		return raw[j:]
 	}
 	return ""
 }

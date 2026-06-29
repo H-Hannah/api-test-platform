@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,28 +40,38 @@ func (s *Service) RunAPI(apiID, envID, datasetID int64) (*store.Run, error) {
 		return nil, err
 	}
 
-	runID, err := s.store.CreateRun(&store.Run{APIID: &apiID, EnvID: envID, Status: "running"})
-	if err != nil {
-		return nil, err
-	}
-
 	vars := buildRunVars(env)
 	body := api.Body
 	headers := api.Headers
+	assertions := assertionInputsFromStore(api.Assertions)
+
 	if datasetID > 0 {
 		ds, err := s.store.GetTestDataset(datasetID)
 		if err != nil {
 			return nil, err
 		}
+		if !store.DatasetBelongsToAPI(ds, api) {
+			return nil, fmt.Errorf("dataset %d does not belong to api %d", datasetID, apiID)
+		}
 		applyDatasetToRun(ds, vars, &body, &headers)
+		if dsAssertions := ParseAssertionListJSON(ds.Assertions); len(dsAssertions) > 0 {
+			assertions = dsAssertions
+		}
 	}
-	fullTpl := ensureFullURLTemplate(api.FullURLTemplate, api.Path)
+	if len(assertions) == 0 {
+		return nil, fmt.Errorf("no assertions configured: select a test case with assertions or add api-level assertions")
+	}
 
+	runID, err := s.store.CreateRun(&store.Run{APIID: &apiID, EnvID: envID, Status: "running"})
+	if err != nil {
+		return nil, err
+	}
+
+	fullTpl := ensureFullURLTemplate(api.FullURLTemplate, api.Path)
 	step := store.ScenarioStep{
 		Name: api.Name, Method: api.Method, Path: api.Path,
 		Headers: headers, Body: body,
 	}
-	assertions := assertionInputsFromStore(api.Assertions)
 	res := s.executeStep(step, vars, assertions, fullTpl)
 
 	st := &store.RunStep{
@@ -136,6 +147,11 @@ func (s *Service) RunScenario(scenarioID, envID int64) (*store.Run, error) {
 
 func (s *Service) executeStep(step store.ScenarioStep, vars map[string]string, assertions []AssertionInput, fullURLTemplate string) StepResult {
 	res := StepResult{StepOrder: step.StepOrder, Name: step.Name, Status: "failed"}
+
+	if len(assertions) == 0 {
+		res.ErrorMessage = "no assertions configured"
+		return res
+	}
 
 	url := substitute(ResolveRequestURL(step.Path, fullURLTemplate, vars), vars)
 	method := strings.ToUpper(strings.TrimSpace(step.Method))

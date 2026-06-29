@@ -18,6 +18,8 @@ var migrationFiles = []string{
 	"013_bdd_acceptance_md.sql",
 	"014_test_datasets.sql",
 	"015_global_environments.sql",
+	"016_env_url_keys_only.sql",
+	"017_test_dataset_assertions.sql",
 }
 
 func (s *Store) ensureMigrationTable() error {

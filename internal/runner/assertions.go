@@ -209,6 +209,9 @@ func ParseAssertionListJSON(raw string) []AssertionInput {
 }
 
 func AllPassed(results []AssertionResult) bool {
+	if len(results) == 0 {
+		return false
+	}
 	for _, r := range results {
 		if !r.Passed {
 			return false

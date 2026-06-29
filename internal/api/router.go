@@ -79,6 +79,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/apis/{id}", s.getAPI)
 		r.Patch("/apis/{id}/meta", s.patchAPIMeta)
 		r.Delete("/apis/{id}", s.deleteAPI)
+		r.Post("/apis/{id}/generate-cases", s.generateAPICases)
 		r.Post("/apis/{id}/run", s.runAPI)
 		r.Get("/apis/{id}/runs", s.listAPIRuns)
 
@@ -94,6 +95,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/products/{productId}/testdata/import", s.importTestData)
 		r.Get("/products/{productId}/testdata/datasets", s.listTestDatasets)
 		r.Get("/testdata/datasets/{id}", s.getTestDataset)
+		r.Patch("/testdata/datasets/{id}", s.patchTestDataset)
 		r.Delete("/testdata/datasets/{id}", s.deleteTestDataset)
 		r.Post("/environments/{id}/import-var-keys", s.importEnvVarKeys)
 		r.Post("/impact/analyze", s.impactAnalyze)
@@ -415,6 +417,20 @@ func (s *Server) getAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, api)
 }
 
+func (s *Server) generateAPICases(w http.ResponseWriter, r *http.Request) {
+	id := paramInt64(r, "id")
+	var body struct {
+		Hint string `json:"hint"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	resp, err := s.ingest.GenerateAPICases(id, body.Hint)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, resp)
+}
+
 func (s *Server) deleteAPI(w http.ResponseWriter, r *http.Request) {
 	id := paramInt64(r, "id")
 	if err := s.store.DeleteAPI(id); err != nil {
@@ -668,6 +684,11 @@ func (s *Server) listTestDatasetsWithProduct(w http.ResponseWriter, r *http.Requ
 	if list == nil {
 		list = []store.TestDataset{}
 	}
+	if apiID > 0 {
+		for i := range list {
+			s.store.EnrichDatasetStale(apiID, &list[i])
+		}
+	}
 	writeJSON(w, list)
 }
 
@@ -679,6 +700,58 @@ func (s *Server) getTestDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, ds)
+}
+
+func (s *Server) patchTestDataset(w http.ResponseWriter, r *http.Request) {
+	id := paramInt64(r, "id")
+	var body struct {
+		Name            string `json:"name"`
+		Description     string `json:"description"`
+		Variables       string `json:"variables"`
+		HeadersOverride string `json:"headers_override"`
+		BodyOverride    string `json:"body_override"`
+		Assertions      string `json:"assertions"`
+		Tags            string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	existing, err := s.store.GetTestDataset(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if v := strings.TrimSpace(body.Name); v != "" {
+		existing.Name = v
+	}
+	existing.Description = body.Description
+	if strings.TrimSpace(body.Variables) != "" {
+		existing.Variables = body.Variables
+	} else if body.Variables != "" {
+		existing.Variables = "{}"
+	}
+	if body.HeadersOverride != "" {
+		existing.HeadersOverride = body.HeadersOverride
+	}
+	existing.BodyOverride = body.BodyOverride
+	if strings.TrimSpace(body.Assertions) != "" {
+		existing.Assertions = body.Assertions
+	}
+	if strings.TrimSpace(body.Tags) != "" {
+		existing.Tags = body.Tags
+	}
+	if apiID := store.ParseAPIRequirementID(existing.RequirementID); apiID > 0 {
+		if api, err := s.store.GetAPI(apiID); err == nil {
+			existing.ApiFingerprint = store.APIDefinitionFingerprint(api)
+		}
+	}
+	if err := s.store.UpdateTestDataset(existing); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated, _ := s.store.GetTestDataset(id)
+	writeJSON(w, updated)
 }
 
 func (s *Server) deleteTestDataset(w http.ResponseWriter, r *http.Request) {

@@ -48,6 +48,7 @@ type APIDefinition struct {
 	UpdatedAt       string `json:"updated_at"`
 	Assertions      []Assertion `json:"assertions,omitempty"`
 	AssertionCount  int    `json:"assertion_count,omitempty"`
+	CaseCount       int    `json:"case_count,omitempty"`
 	ScenarioReady   bool   `json:"scenario_ready,omitempty"`
 }
 
@@ -146,8 +147,12 @@ type TestDataset struct {
 	Owner           string `json:"owner"`
 	Tags            string `json:"tags"`
 	Source          string `json:"source"`
+	Assertions      string `json:"assertions"`
+	ApiFingerprint  string `json:"api_fingerprint,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
+	Stale           bool   `json:"stale,omitempty"`
+	StaleReason     string `json:"stale_reason,omitempty"`
 }
 
 // TestDataSpec 需求包维度的数据规格文档（YAML）。

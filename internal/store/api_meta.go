@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // APIListFilter 列表筛选（MR / US / 缺口）。
@@ -22,7 +21,7 @@ const apiSelectCols = `a.id, a.product_id, a.folder_id, a.name, a.method, a.path
 
 func scanAPI(row interface {
 	Scan(dest ...any) error
-}, api *APIDefinition, assertionCount *int) error {
+}, api *APIDefinition, assertionCount, caseCount *int) error {
 	dest := []any{
 		&api.ID, &api.ProductID, &api.FolderID, &api.Name, &api.Method, &api.Path,
 		&api.FullURLTemplate, &api.Headers, &api.Body, &api.BodyType,
@@ -32,19 +31,31 @@ func scanAPI(row interface {
 	if assertionCount != nil {
 		dest = append(dest, assertionCount)
 	}
+	if caseCount != nil {
+		dest = append(dest, caseCount)
+	}
 	return row.Scan(dest...)
 }
 
-func fillAPIScenarioFlags(api *APIDefinition, assertionCount int) {
-	api.AssertionCount = assertionCount
-	api.ScenarioReady = strings.TrimSpace(api.UserStory) != "" &&
-		strings.TrimSpace(api.TCRef) != "" &&
-		assertionCount > 0
+func fillAPIScenarioFlags(api *APIDefinition, caseCount int) {
+	api.CaseCount = caseCount
+	api.ScenarioReady = caseCount > 0
 }
+
+const apiCaseCountSQL = `(SELECT COUNT(1) FROM test_datasets td WHERE
+		td.requirement_id = ('api-' || a.id)
+		OR (
+			td.requirement_id != ('api-' || a.id)
+			AND EXISTS (
+				SELECT 1 FROM json_each(td.api_bindings) je
+				WHERE lower(trim(je.value)) = lower(trim(upper(a.method) || ' ' || trim(a.path)))
+			)
+		))`
 
 func (s *Store) ListAPIsFiltered(f APIListFilter) ([]APIDefinition, error) {
 	q := `SELECT ` + apiSelectCols + `,
-		(SELECT COUNT(1) FROM api_assertions WHERE api_id = a.id AND enabled = 1) AS ac
+		(SELECT COUNT(1) FROM api_assertions WHERE api_id = a.id AND enabled = 1) AS ac,
+		` + apiCaseCountSQL + ` AS cc
 		FROM api_definitions a WHERE 1=1`
 	args := []any{}
 	if f.ProductID > 0 {
@@ -73,13 +84,9 @@ func (s *Store) ListAPIsFiltered(f APIListFilter) ([]APIDefinition, error) {
 	case "no_assert", "no_assertions":
 		q += ` AND (SELECT COUNT(1) FROM api_assertions WHERE api_id = a.id AND enabled = 1) = 0`
 	case "not_ready":
-		q += ` AND NOT (
-			TRIM(a.user_story) != '' AND TRIM(a.tc_ref) != '' AND
-			(SELECT COUNT(1) FROM api_assertions WHERE api_id = a.id AND enabled = 1) > 0
-		)`
+		q += ` AND ` + apiCaseCountSQL + ` = 0`
 	case "ready":
-		q += ` AND TRIM(a.user_story) != '' AND TRIM(a.tc_ref) != '' AND
-			(SELECT COUNT(1) FROM api_assertions WHERE api_id = a.id AND enabled = 1) > 0`
+		q += ` AND ` + apiCaseCountSQL + ` > 0`
 	}
 	q += ` ORDER BY a.updated_at DESC`
 	rows, err := s.db.Query(q, args...)
@@ -90,14 +97,15 @@ func (s *Store) ListAPIsFiltered(f APIListFilter) ([]APIDefinition, error) {
 	var list []APIDefinition
 	for rows.Next() {
 		var api APIDefinition
-		var ac int
-		if err := scanAPI(rows, &api, &ac); err != nil {
+		var ac, cc int
+		if err := scanAPI(rows, &api, &ac, &cc); err != nil {
 			return nil, err
 		}
+		api.AssertionCount = ac
 		if api.FolderID > 0 {
 			api.FolderPath, _ = s.GetFolderPath(api.FolderID)
 		}
-		fillAPIScenarioFlags(&api, ac)
+		fillAPIScenarioFlags(&api, cc)
 		list = append(list, api)
 	}
 	return list, rows.Err()
@@ -105,10 +113,10 @@ func (s *Store) ListAPIsFiltered(f APIListFilter) ([]APIDefinition, error) {
 
 func (s *Store) UpdateAPIMeta(id int64, userStory, bddRef, tcRef, mrTags string) error {
 	_, err := s.db.Exec(`
-		UPDATE api_definitions SET user_story = ?, bdd_ref = ?, tc_ref = ?, mr_tags = ?, updated_at = ?
+		UPDATE api_definitions SET user_story = ?, bdd_ref = ?, tc_ref = ?, mr_tags = ?
 		WHERE id = ?`,
 		strings.TrimSpace(userStory), strings.TrimSpace(bddRef), strings.TrimSpace(tcRef), normalizeMRTags(mrTags),
-		time.Now().UTC().Format("2006-01-02 15:04:05"), id)
+		id)
 	return err
 }
 
@@ -237,7 +245,7 @@ func (s *Store) GetAPICoverage(productID int64, mrTag string) (*APICoverage, err
 func (s *Store) getAPIRow(id int64) (*APIDefinition, error) {
 	api := &APIDefinition{}
 	row := s.db.QueryRow(`SELECT `+apiSelectCols+` FROM api_definitions a WHERE a.id = ?`, id)
-	if err := scanAPI(row, api, nil); err != nil {
+	if err := scanAPI(row, api, nil, nil); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
 		}

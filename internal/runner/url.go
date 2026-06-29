@@ -14,10 +14,7 @@ func ResolveRequestURL(path, fullURLTemplate string, vars map[string]string) str
 	if p == "" {
 		return substitute(strings.TrimRight(vars["base_url"], "/"), vars)
 	}
-	if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
-		return substitute(p, vars)
-	}
-	if strings.Contains(p, "{{base_url") {
+	if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") || strings.Contains(p, "{{") {
 		return substitute(p, vars)
 	}
 	base := strings.TrimRight(vars["base_url"], "/")

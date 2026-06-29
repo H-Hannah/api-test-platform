@@ -106,12 +106,15 @@ type RunPlanResult struct {
 	Total   int              `json:"total"`
 	Passed  int              `json:"passed"`
 	Failed  int              `json:"failed"`
+	Skipped int              `json:"skipped"`
 	Runs    []RunPlanItem    `json:"runs"`
 }
 
 type RunPlanItem struct {
 	Kind       string `json:"kind"` // api | scenario
 	TargetID   int64  `json:"target_id"`
+	DatasetID  int64  `json:"dataset_id,omitempty"`
+	DatasetKey string `json:"dataset_key,omitempty"`
 	Name       string `json:"name"`
 	RunID      int64  `json:"run_id,omitempty"`
 	Status     string `json:"status"`

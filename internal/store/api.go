@@ -49,7 +49,9 @@ func (s *Store) GetAPI(id int64) (*APIDefinition, error) {
 		return nil, err
 	}
 	api.Assertions = assertions
-	fillAPIScenarioFlags(api, len(assertions))
+	api.AssertionCount = len(assertions)
+	cc, _ := s.CountAPICases(id)
+	fillAPIScenarioFlags(api, cc)
 	return api, nil
 }
 
@@ -79,6 +81,13 @@ func (s *Store) ListAPIs(productID int64, folderID int64) ([]APIDefinition, erro
 }
 
 func (s *Store) DeleteAPI(id int64) error {
+	reqID := APIRequirementID(id)
+	if _, err := s.db.Exec(`DELETE FROM test_datasets WHERE requirement_id = ?`, reqID); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM api_assertions WHERE api_id = ?`, id); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`DELETE FROM api_definitions WHERE id = ?`, id)
 	return err
 }

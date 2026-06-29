@@ -105,7 +105,7 @@ func shouldDropHeader(name string) bool {
 
 func normalizeAuthorization(val string) string {
 	if val == "" {
-		return "Bearer {{token}}"
+		return val
 	}
 	lower := strings.ToLower(val)
 	if strings.HasPrefix(lower, "bearer ") && len(val) > 20 {

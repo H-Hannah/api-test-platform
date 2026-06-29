@@ -1,15 +1,39 @@
-/** 统一环境变量：各业务线常用多服务 base_url（与 runner buildRunVars 对齐） */
-const SERVICE_KEY_DEFS = [
-  { key: 'base_url_edgen', label: 'Edgen API', hint: '主业务 API 域名' },
-  { key: 'base_url_trex', label: 'Trex API', hint: '主业务 API 域名' },
-  { key: 'base_url_quest', label: 'Quest', hint: '任务/活动服务' },
-  { key: 'base_url_anchor', label: 'Anchor', hint: 'Anchor 服务' },
-  { key: 'base_url_openreplay', label: 'OpenReplay', hint: '回放/监控' },
-  { key: 'base_url_example', label: 'Example API', hint: '示例域名' }
+/** 环境管理默认 URL 变量（token 在测试数据中配置） */
+export const ENV_MATRIX_ROWS = [
+  { key: 'edgen_url', placeholder: 'https://...' },
+  { key: 'quest_edgen_url', placeholder: 'https://...' },
+  { key: 'trex_url', placeholder: 'https://...' },
+  { key: 'quest_trex_url', placeholder: 'https://...' },
+  { key: 'anchor_url', placeholder: 'https://...' }
 ]
 
-export function serviceKeysForProduct(_productName) {
-  return SERVICE_KEY_DEFS
+export const ENV_ORDER = { BETA: 0, PRE: 1, PROD: 2 }
+
+const LEGACY_ENV_KEY =
+  /^(base_url(_|$)|token$|.*_token$|openreplay_url$|test$)/
+
+export function isLegacyEnvKey(key) {
+  const k = (key || '').trim()
+  return !k || k === 'base_url' || LEGACY_ENV_KEY.test(k)
+}
+
+/** 从默认 URL 变量推导 DB base_url 列 */
+export function deriveBaseURL(form, rowDefs = []) {
+  const presetKeys = ENV_MATRIX_ROWS.map((r) => r.key)
+  const byKey = new Map(rowDefs.map((r) => [(r.key || '').trim(), r]))
+  for (const key of presetKeys) {
+    const row = byKey.get(key)
+    if (!row) continue
+    const v = (form.values?.[row.id] || '').trim()
+    if (v) return v.replace(/\/+$/, '')
+  }
+  for (const row of rowDefs) {
+    const k = (row.key || '').trim()
+    const v = (form.values?.[row.id] || '').trim()
+    if (!v || !k.endsWith('_url')) continue
+    return v.replace(/\/+$/, '')
+  }
+  return ''
 }
 
 export function parseVariables(raw) {
@@ -38,20 +62,12 @@ export function stringifyVariables(obj) {
   return JSON.stringify(clean)
 }
 
-export function tokenConfigured(vars) {
-  return !!(vars?.token && String(vars.token).trim())
-}
-
-export function buildVariablesPayload(form) {
-  const vars = { ...form.vars }
-  vars.base_url = (form.base_url || '').replace(/\/+$/, '')
-  if (form.token !== undefined) {
-    vars.token = form.token || ''
-  }
-  for (const row of form.customRows || []) {
+export function buildVariablesPayload(form, rowDefs = []) {
+  const vars = {}
+  for (const row of rowDefs) {
     const k = (row.key || '').trim()
-    if (!k) continue
-    vars[k] = row.value ?? ''
+    if (!k || isLegacyEnvKey(k)) continue
+    vars[k] = form.values?.[row.id] ?? ''
   }
   return stringifyVariables(vars)
 }

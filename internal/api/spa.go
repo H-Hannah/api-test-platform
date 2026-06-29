@@ -19,7 +19,7 @@ func SPAHandler(distDir string) http.Handler {
 			return
 		}
 		// 前端路由直链（/apis、/environments 等）统一回退 index.html
-		if p == "/apis" || p == "/testdata" || p == "/impact" || p == "/mr" || p == "/scenarios" || p == "/reports" || p == "/environments" || p == "/login" {
+		if p == "/apis" || p == "/cases" || p == "/testdata" || p == "/impact" || p == "/mr" || p == "/scenarios" || p == "/reports" || p == "/environments" || p == "/login" {
 			serveIndex(w, indexPath)
 			return
 		}

@@ -14,21 +14,26 @@ var (
 	unresolvedVarPattern  = regexp.MustCompile(`\{\{(\w+)\}\}`)
 )
 
-// buildRunVars 合并 environments.variables 与 base_url 列，并补齐常见 base_url_* 别名。
+// buildRunVars 合并 environments.variables 与 base_url 列。
 func buildRunVars(env *store.Environment) map[string]string {
 	vars := parseVars(env.Variables)
 	base := strings.TrimRight(strings.TrimSpace(env.BaseURL), "/")
-	if base != "" {
-		vars["base_url"] = base
+	if base == "" {
 		for _, key := range []string{
+			"edgen_url", "trex_url", "quest_trex_url", "anchor_url", "quest_edgen_url",
 			"base_url_edgen", "base_url_trex", "base_url_quest",
-			"base_url_anchor", "base_url_openreplay", "base_url_example",
+			"base_url_anchor", "base_url_openreplay",
 		} {
-			if strings.TrimSpace(vars[key]) == "" {
-				vars[key] = base
+			if v := strings.TrimRight(strings.TrimSpace(vars[key]), "/"); v != "" {
+				base = v
+				break
 			}
 		}
 	}
+	if base != "" {
+		vars["base_url"] = base
+	}
+	delete(vars, "base_url_example")
 	return vars
 }
 
@@ -59,8 +64,9 @@ func substitute(s string, vars map[string]string) string {
 		if v, ok := vars[key]; ok && strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
 		}
-		// base_url_quest 等未单独配置时，回退到当前环境的 base_url
-		if strings.HasPrefix(key, "base_url") && strings.TrimSpace(vars["base_url"]) != "" {
+		// *_url / base_url_* 未单独配置时，回退到当前环境的 base_url
+		if (strings.HasSuffix(key, "_url") || strings.HasPrefix(key, "base_url")) &&
+			strings.TrimSpace(vars["base_url"]) != "" {
 			return strings.TrimSpace(vars["base_url"])
 		}
 		return m
